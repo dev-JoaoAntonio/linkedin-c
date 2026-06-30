@@ -1,0 +1,39 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# env — NUNCA commitar segredos
+.env
+.env.local
+.env.*.local
+
+# prisma
+# (mantemos schema e migrations versionados; nada gerado aqui por enquanto)
+
+# misc
+*.pem
+.DS_Store
+*.log
+npm-debug.log*
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# claude
+CLAUDE.md
+claude.md
+.claude/

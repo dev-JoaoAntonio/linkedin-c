@@ -1,0 +1,56 @@
+// mesa — schema do banco
+// Banco: PostgreSQL. Toda mudança de schema acompanha migration (prisma/migrations).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  FAILED
+}
+
+/// Conta do LinkedIn conectada. Linha única, id fixo "primary".
+model LinkedInAccount {
+  id               String    @id @default("primary")
+  /// id do membro (sub do OpenID). Vira urn:li:person:<memberId> ao publicar.
+  memberId         String
+  name             String?
+  accessToken      String
+  refreshToken     String?
+  /// expiração do access token (LinkedIn: ~60 dias). Guardado em UTC.
+  expiresAt        DateTime
+  /// expiração do refresh token (LinkedIn: ~365 dias). Guardado em UTC.
+  refreshExpiresAt DateTime?
+  scope            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+/// Posts: rascunhos, agendados, publicados e falhos.
+model Post {
+  id          String     @id @default(cuid())
+  content     String
+  status      PostStatus @default(DRAFT)
+  /// tema usado na geração (opcional, ajuda no histórico)
+  topic       String?
+  /// instante de publicação agendado, sempre em UTC
+  scheduledAt DateTime?
+  /// instante em que foi efetivamente publicado, em UTC
+  publishedAt DateTime?
+  /// URN retornado pelo LinkedIn (x-restli-id), ex.: urn:li:share:7300...
+  linkedinId  String?
+  /// última mensagem de erro de publicação (quando status = FAILED)
+  error       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([status, scheduledAt])
+}
