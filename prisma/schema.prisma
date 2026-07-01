@@ -6,8 +6,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Runtime: pooler de transação do Supabase (porta 6543, ?pgbouncer=true).
+  url       = env("DATABASE_URL")
+  // Migrations: conexão de sessão (porta 5432). O pooler de transação não
+  // suporta migrate/db push. Prisma usa este endpoint só nessas operações.
+  directUrl = env("DIRECT_URL")
 }
 
 enum PostStatus {

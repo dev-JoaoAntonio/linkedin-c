@@ -50,6 +50,11 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
   const [drafts, setDrafts] = useState<PostDTO[]>([]);
   const [history, setHistory] = useState<PostDTO[]>([]);
 
+  // Assuntos gerados nesta sessão — enviados ao gerar para a IA não repetir.
+  const [recentTopics, setRecentTopics] = useState<string[]>([]);
+  // Busca na aba Histórico.
+  const [historyQuery, setHistoryQuery] = useState("");
+
   // UX
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: "ok" | "error"; msg: string } | null>(null);
@@ -99,16 +104,14 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
 
   // ── Ações ────────────────────────────────────────────────
   async function doGenerate() {
-    if (!topic.trim()) {
-      showToast("error", "Escreva um tema primeiro.");
-      return;
-    }
+    // Sem tema é o caminho principal: a IA pesquisa novidades e escreve sozinha.
+    const auto = !topic.trim();
     setBusy("generate");
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic, extra }),
+        body: JSON.stringify({ topic, extra, recent: auto ? recentTopics : undefined }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -116,6 +119,12 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
         return;
       }
       setText(data.text);
+      // No modo automático, guardamos a manchete detectada como tema e a
+      // acumulamos para os próximos cliques não repetirem o assunto.
+      if (auto && data.topic) {
+        setTopic(data.topic);
+        setRecentTopics((prev) => [data.topic, ...prev].slice(0, 15));
+      }
       setFolded(true);
     } catch {
       showToast("error", "Erro de conexão com a geração.");
@@ -297,11 +306,36 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
     router.refresh();
   }
 
+  async function doCopy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("ok", "Texto copiado.");
+    } catch {
+      showToast("error", "Não foi possível copiar.");
+    }
+  }
+
   // ── Derivados ────────────────────────────────────────────
   const scheduled = useMemo(() => drafts.filter((d) => d.status === "SCHEDULED"), [drafts]);
   const onlyDrafts = useMemo(() => drafts.filter((d) => d.status === "DRAFT"), [drafts]);
-  const published = useMemo(() => history.filter((p) => p.status === "PUBLISHED"), [history]);
-  const failed = useMemo(() => history.filter((p) => p.status === "FAILED"), [history]);
+  const matchesQuery = useCallback(
+    (p: PostDTO) => {
+      const q = historyQuery.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        p.content.toLowerCase().includes(q) || (p.topic ?? "").toLowerCase().includes(q)
+      );
+    },
+    [historyQuery],
+  );
+  const published = useMemo(
+    () => history.filter((p) => p.status === "PUBLISHED" && matchesQuery(p)),
+    [history, matchesQuery],
+  );
+  const failed = useMemo(
+    () => history.filter((p) => p.status === "FAILED" && matchesQuery(p)),
+    [history, matchesQuery],
+  );
 
   const minSchedule = utcToSpInputValue(new Date(Date.now() + 60 * 1000));
   const initials = (accountName || "eu").trim().slice(0, 2).toUpperCase();
@@ -353,12 +387,17 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
             <div className="card-head">
               <h2>1 · Gerar com IA</h2>
             </div>
+            <p style={{ margin: "0 0 14px", color: "var(--muted, #8a8a8a)", fontSize: 14 }}>
+              Clique em <strong>Gerar post automático</strong> e a IA pesquisa as novidades de
+              tecnologia e desenvolvimento na web e escreve um post. Cada clique traz um diferente.
+              Quer direcionar? Preencha um tema abaixo (opcional).
+            </p>
             <div className="field">
-              <label className="label">Tema</label>
+              <label className="label">Tema (opcional)</label>
               <input
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                placeholder="Ex.: o que aprendi automatizando relatórios no setor público"
+                placeholder="Deixe vazio para a IA escolher a partir das novidades de tech"
               />
             </div>
             <div className="field">
@@ -371,7 +410,11 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
             </div>
             <div className="btn-row" style={{ marginTop: 14 }}>
               <button className="btn btn-leaf" onClick={doGenerate} disabled={busy === "generate"}>
-                {busy === "generate" ? "Gerando…" : "Gerar texto"}
+                {busy === "generate"
+                  ? "Pesquisando e gerando…"
+                  : topic.trim()
+                    ? "Gerar texto"
+                    : "Gerar post automático"}
               </button>
             </div>
           </section>
@@ -543,11 +586,23 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
       {tab === "history" && (
         <>
           <section className="card">
+            <div className="field">
+              <input
+                value={historyQuery}
+                onChange={(e) => setHistoryQuery(e.target.value)}
+                placeholder="Buscar no histórico por texto ou tema…"
+              />
+            </div>
+          </section>
+
+          <section className="card">
             <div className="card-head">
-              <h2>Publicados</h2>
+              <h2>Publicados<span className="count">{published.length}</span></h2>
             </div>
             {published.length === 0 ? (
-              <div className="empty">Nada publicado ainda.</div>
+              <div className="empty">
+                {historyQuery.trim() ? "Nenhum publicado bate com a busca." : "Nada publicado ainda."}
+              </div>
             ) : (
               published.map((p) => (
                 <div className="item" key={p.id}>
@@ -557,6 +612,7 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
                       {p.publishedAt ? formatSpDateTime(new Date(p.publishedAt)) : ""}
                     </span>
                   </div>
+                  {p.topic && <div className="item-meta" style={{ marginBottom: 6 }}>Tema: {p.topic}</div>}
                   <div className="item-text">{p.content}</div>
                   <div className="item-actions">
                     {p.url ? (
@@ -566,6 +622,9 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
                     ) : (
                       <span className="item-meta">URN não disponível</span>
                     )}
+                    <button className="btn btn-ghost btn-sm" onClick={() => doCopy(p.content)}>
+                      Copiar
+                    </button>
                     <button className="btn btn-danger btn-sm" onClick={() => doDelete(p.id)}>
                       Remover do histórico
                     </button>
@@ -578,7 +637,7 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
           {failed.length > 0 && (
             <section className="card">
               <div className="card-head">
-                <h2>Falhas</h2>
+                <h2>Falhas<span className="count">{failed.length}</span></h2>
               </div>
               {failed.map((p) => (
                 <div className="item" key={p.id}>
@@ -586,11 +645,15 @@ export default function Console({ linkedinConnected, accountName, isDev }: Props
                     <span className="badge badge-failed">Falhou</span>
                     <span className="item-meta">{formatSpDateTime(new Date(p.updatedAt))}</span>
                   </div>
+                  {p.topic && <div className="item-meta" style={{ marginBottom: 6 }}>Tema: {p.topic}</div>}
                   <div className="item-text">{p.content}</div>
                   {p.error && <div className="item-error">{p.error}</div>}
                   <div className="item-actions">
                     <button className="btn btn-ghost btn-sm" onClick={() => loadIntoComposer(p)}>
                       Editar e tentar de novo
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => doCopy(p.content)}>
+                      Copiar
                     </button>
                     <button className="btn btn-danger btn-sm" onClick={() => doDelete(p.id)}>
                       Excluir
